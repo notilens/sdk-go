@@ -47,7 +47,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Agent '%s' not found\n", rest[0])
 		}
 
-	case "task.queue":
+	case "queue":
 		flags := parseFlags(rest)
 		runId := genRunId()
 		sf := notilens.GetStateFile(flags.agent, runId)
@@ -68,7 +68,7 @@ func main() {
 		sendNotify("task.queued", "Task queued", flags, runId)
 		fmt.Println(runId)
 
-	case "task.start":
+	case "start":
 		flags := parseFlags(rest)
 		// Reuse run_id from a prior task.queue if available
 		runId := notilens.ReadPointer(flags.agent, flags.taskLabel)
@@ -98,7 +98,7 @@ func main() {
 		sendNotify("task.started", "Task started", flags, runId)
 		fmt.Println(runId)
 
-	case "task.progress":
+	case "progress":
 		pos, rest2 := positionalArgs(rest)
 		msg := ""
 		if len(pos) > 0 { msg = pos[0] }
@@ -106,7 +106,7 @@ func main() {
 		runId := resolveRunId(flags)
 		sendNotify("task.progress", msg, flags, runId)
 
-	case "task.loop":
+	case "loop":
 		pos, rest2 := positionalArgs(rest)
 		msg := ""
 		if len(pos) > 0 { msg = pos[0] }
@@ -118,7 +118,7 @@ func main() {
 		notilens.UpdateState(sf, map[string]interface{}{"loop_count": loopCount})
 		sendNotify("task.loop", msg, flags, runId)
 
-	case "task.retry":
+	case "retry":
 		flags := parseFlags(rest)
 		runId := resolveRunId(flags)
 		sf := notilens.GetStateFile(flags.agent, runId)
@@ -127,12 +127,12 @@ func main() {
 		notilens.UpdateState(sf, map[string]interface{}{"retry_count": retryCount})
 		sendNotify("task.retry", "Retrying task", flags, runId)
 
-	case "task.stop":
+	case "stop":
 		flags := parseFlags(rest)
 		runId := resolveRunId(flags)
 		sendNotify("task.stopped", "Task stopped", flags, runId)
 
-	case "task.pause":
+	case "pause":
 		pos, rest2 := positionalArgs(rest)
 		msg := ""
 		if len(pos) > 0 { msg = pos[0] }
@@ -146,7 +146,7 @@ func main() {
 		})
 		sendNotify("task.paused", msg, flags, runId)
 
-	case "task.resume":
+	case "resume":
 		pos, rest2 := positionalArgs(rest)
 		msg := ""
 		if len(pos) > 0 { msg = pos[0] }
@@ -169,7 +169,7 @@ func main() {
 		}
 		sendNotify("task.resumed", msg, flags, runId)
 
-	case "task.wait":
+	case "wait":
 		pos, rest2 := positionalArgs(rest)
 		msg := ""
 		if len(pos) > 0 { msg = pos[0] }
@@ -183,7 +183,7 @@ func main() {
 		})
 		sendNotify("task.waiting", msg, flags, runId)
 
-	case "task.error":
+	case "error":
 		pos, rest2 := positionalArgs(rest)
 		msg := ""
 		if len(pos) > 0 { msg = pos[0] }
@@ -197,7 +197,7 @@ func main() {
 		})
 		sendNotify("task.error", msg, flags, runId)
 
-	case "task.fail":
+	case "fail":
 		pos, rest2 := positionalArgs(rest)
 		msg := ""
 		if len(pos) > 0 { msg = pos[0] }
@@ -207,7 +207,7 @@ func main() {
 		notilens.DeleteState(notilens.GetStateFile(flags.agent, runId))
 		notilens.DeletePointer(flags.agent, flags.taskLabel)
 
-	case "task.timeout":
+	case "timeout":
 		pos, rest2 := positionalArgs(rest)
 		msg := ""
 		if len(pos) > 0 { msg = pos[0] }
@@ -217,7 +217,7 @@ func main() {
 		notilens.DeleteState(notilens.GetStateFile(flags.agent, runId))
 		notilens.DeletePointer(flags.agent, flags.taskLabel)
 
-	case "task.cancel":
+	case "cancel":
 		pos, rest2 := positionalArgs(rest)
 		msg := ""
 		if len(pos) > 0 { msg = pos[0] }
@@ -227,7 +227,7 @@ func main() {
 		notilens.DeleteState(notilens.GetStateFile(flags.agent, runId))
 		notilens.DeletePointer(flags.agent, flags.taskLabel)
 
-	case "task.terminate":
+	case "terminate":
 		pos, rest2 := positionalArgs(rest)
 		msg := ""
 		if len(pos) > 0 { msg = pos[0] }
@@ -237,7 +237,7 @@ func main() {
 		notilens.DeleteState(notilens.GetStateFile(flags.agent, runId))
 		notilens.DeletePointer(flags.agent, flags.taskLabel)
 
-	case "task.complete":
+	case "complete":
 		pos, rest2 := positionalArgs(rest)
 		msg := ""
 		if len(pos) > 0 { msg = pos[0] }
@@ -456,7 +456,7 @@ func parseFlags(args []string) flags {
 }
 
 // resolveRunId reads the pointer file for the current task label.
-// Exits with an error if no pointer is found (task.start was not called).
+// Exits with an error if no pointer is found (start was not called).
 func resolveRunId(f flags) string {
 	if f.taskLabel == "" {
 		fmt.Fprintln(os.Stderr, "❌ --task is required")
@@ -465,7 +465,7 @@ func resolveRunId(f flags) string {
 	runId := notilens.ReadPointer(f.agent, f.taskLabel)
 	if runId == "" {
 		fmt.Fprintf(os.Stderr,
-			"❌ No active run for task '%s' on agent '%s'. Run task.start first.\n",
+			"❌ No active run for task '%s' on agent '%s'. Run start first.\n",
 			f.taskLabel, f.agent)
 		os.Exit(1)
 	}
@@ -668,21 +668,21 @@ func printUsage() {
   notilens remove-agent <agent>
 
 Task Lifecycle:
-  notilens task.queue           --agent <agent> --task <label>
-  notilens task.start           --agent <agent> --task <label>
-  notilens task.progress  "msg" --agent <agent> --task <label>
-  notilens task.loop      "msg" --agent <agent> --task <label>
-  notilens task.retry           --agent <agent> --task <label>
-  notilens task.stop            --agent <agent> --task <label>
-  notilens task.pause     "msg" --agent <agent> --task <label>
-  notilens task.resume    "msg" --agent <agent> --task <label>
-  notilens task.wait      "msg" --agent <agent> --task <label>
-  notilens task.error     "msg" --agent <agent> --task <label>
-  notilens task.fail      "msg" --agent <agent> --task <label>
-  notilens task.timeout   "msg" --agent <agent> --task <label>
-  notilens task.cancel    "msg" --agent <agent> --task <label>
-  notilens task.terminate "msg" --agent <agent> --task <label>
-  notilens task.complete  "msg" --agent <agent> --task <label>
+  notilens queue           --agent <agent> --task <label>
+  notilens start           --agent <agent> --task <label>
+  notilens progress  "msg" --agent <agent> --task <label>
+  notilens loop      "msg" --agent <agent> --task <label>
+  notilens retry           --agent <agent> --task <label>
+  notilens stop            --agent <agent> --task <label>
+  notilens pause     "msg" --agent <agent> --task <label>
+  notilens resume    "msg" --agent <agent> --task <label>
+  notilens wait      "msg" --agent <agent> --task <label>
+  notilens error     "msg" --agent <agent> --task <label>
+  notilens fail      "msg" --agent <agent> --task <label>
+  notilens timeout   "msg" --agent <agent> --task <label>
+  notilens cancel    "msg" --agent <agent> --task <label>
+  notilens terminate "msg" --agent <agent> --task <label>
+  notilens complete  "msg" --agent <agent> --task <label>
 
 Output / Input:
   notilens output.generate "msg" --agent <agent> --task <label>
