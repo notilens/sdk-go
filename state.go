@@ -2,21 +2,37 @@ package notilens
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
 
-// GetStateFile returns the path to the state file for an agent+task.
-func GetStateFile(agent, taskID string) string {
-	user := os.Getenv("USER")
-	if user == "" {
-		user = os.Getenv("USERNAME")
+func osUser() string {
+	u := os.Getenv("USER")
+	if u == "" {
+		u = os.Getenv("USERNAME")
 	}
-	agent  = strings.ReplaceAll(agent,  string(filepath.Separator), "_")
-	taskID = strings.ReplaceAll(taskID, string(filepath.Separator), "_")
-	return filepath.Join(os.TempDir(), "notilens_"+user+"_"+agent+"_"+taskID+".json")
+	if u == "" {
+		u = "default"
+	}
+	return u
+}
+
+// GetStateFile returns the state file path for a given agent + runId.
+func GetStateFile(agent, runId string) string {
+	user  := osUser()
+	agent  = strings.ReplaceAll(agent, string(filepath.Separator), "_")
+	runId  = strings.ReplaceAll(runId, string(filepath.Separator), "_")
+	return filepath.Join(os.TempDir(), fmt.Sprintf("notilens_%s_%s_%s.json", user, agent, runId))
+}
+
+// GetPointerFile returns the pointer file path for a given agent + label.
+func GetPointerFile(agent, label string) string {
+	user      := osUser()
+	safeLabel := strings.NewReplacer("/", "_", "\\", "_").Replace(label)
+	return filepath.Join(os.TempDir(), fmt.Sprintf("notilens_%s_%s_%s.ptr", user, agent, safeLabel))
 }
 
 // ReadState reads a state file into a map.
@@ -32,10 +48,14 @@ func ReadState(file string) map[string]interface{} {
 	return s
 }
 
-// WriteState writes a state map to a file.
+// WriteState writes a state map to a file atomically.
 func WriteState(file string, s map[string]interface{}) {
 	data, _ := json.MarshalIndent(s, "", "  ")
-	_ = os.WriteFile(file, data, 0600)
+	tmp := file + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, file)
 }
 
 // UpdateState merges updates into an existing state file.
@@ -48,18 +68,52 @@ func UpdateState(file string, updates map[string]interface{}) {
 }
 
 // DeleteState removes a state file.
-func DeleteState(file string) {
-	_ = os.Remove(file)
+func DeleteState(file string) { _ = os.Remove(file) }
+
+// ReadPointer reads the run_id from a pointer file.
+func ReadPointer(agent, label string) string {
+	data, err := os.ReadFile(GetPointerFile(agent, label))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
-// calcDuration returns elapsed ms since task start, or 0 if not started.
-func calcDuration(stateFile string) int64 {
-	s := ReadState(stateFile)
-	start := toInt64(s["start_time"])
-	if start == 0 {
-		return 0
+// WritePointer writes a run_id to a pointer file.
+func WritePointer(agent, label, runId string) {
+	_ = os.WriteFile(GetPointerFile(agent, label), []byte(runId), 0600)
+}
+
+// DeletePointer removes a pointer file.
+func DeletePointer(agent, label string) { _ = os.Remove(GetPointerFile(agent, label)) }
+
+// CleanupStaleState removes state and pointer files older than stateTtlSeconds.
+func CleanupStaleState(agent string, stateTtlSeconds int) {
+	user   := osUser()
+	tmp    := os.TempDir()
+	cutoff := time.Now().Add(-time.Duration(stateTtlSeconds) * time.Second)
+	prefix := fmt.Sprintf("notilens_%s_%s_", user, agent)
+
+	entries, err := os.ReadDir(tmp)
+	if err != nil {
+		return
 	}
-	return time.Now().UnixMilli() - start
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		if !strings.HasSuffix(name, ".json") && !strings.HasSuffix(name, ".ptr") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().Before(cutoff) {
+			_ = os.Remove(filepath.Join(tmp, name))
+		}
+	}
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

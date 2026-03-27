@@ -10,7 +10,7 @@ import (
 
 const (
 	webhookURL = "https://hook.notilens.com/webhook/%s/send"
-	Version    = "0.3.0"
+	Version    = "0.4.0"
 )
 
 var successEvents = map[string]bool{
@@ -30,6 +30,8 @@ var urgentEvents = map[string]bool{
 var warningEvents = map[string]bool{
 	"task.retry":     true,
 	"task.cancelled": true,
+	"task.paused":    true,
+	"task.waiting":   true,
 	"input.required": true,
 	"input.rejected": true,
 }

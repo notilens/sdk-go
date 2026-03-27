@@ -18,9 +18,10 @@ if err != nil {
     log.Fatal(err)
 }
 
-taskID := nl.TaskStart()
-nl.TaskProgress("Processing...", taskID)
-nl.TaskComplete("Done!", taskID)
+run := nl.Task("report")
+run.Start()
+run.Progress("Processing...")
+run.Complete("Done!")
 ```
 
 ## Credentials
@@ -32,8 +33,9 @@ Resolved in order:
 
 ```go
 nl, err := notilens.Init("my-agent", notilens.Options{
-    Token:  "your-token",
-    Secret: "your-secret",
+    Token:    "your-token",
+    Secret:   "your-secret",
+    StateTtl: 86400, // optional — orphaned state TTL in seconds (default: 86400)
 })
 ```
 
@@ -41,31 +43,39 @@ nl, err := notilens.Init("my-agent", notilens.Options{
 
 ### Task Lifecycle
 
-```go
-taskID := nl.TaskStart()                         // auto-generates ID
-taskID  = nl.TaskStart("my-task-123")            // custom ID
+`nl.Task(label)` creates a `Run` — an isolated execution context. Multiple concurrent runs of the same label never conflict.
 
-nl.TaskProgress("Fetching data...", taskID)
-nl.TaskLoop("Processing item 42", taskID)
-nl.TaskRetry(taskID)
-nl.TaskStop(taskID)
-nl.TaskError("Quota exceeded", taskID)           // non-fatal
-nl.TaskComplete("All done!", taskID)             // terminal
-nl.TaskFail("Unrecoverable error", taskID)       // terminal
-nl.TaskTimeout("Timed out after 5m", taskID)     // terminal
-nl.TaskCancel("Cancelled by user", taskID)       // terminal
-nl.TaskTerminate("Force-killed", taskID)         // terminal
+```go
+run := nl.Task("email")  // create a run for the "email" task
+run.Queue()              // optional — pre-start signal
+run.Start()              // begin the run
+
+run.Progress("Fetching data...")
+run.Loop("Processing item 42")
+run.Retry()
+run.Pause("Waiting for rate limit")
+run.Resume("Resuming work")
+run.Wait("Waiting for tool response")
+run.Stop()
+run.Error("Quota exceeded") // non-fatal, run continues
+
+// Terminal — pick one
+run.Complete("All done!")
+run.Fail("Unrecoverable error")
+run.Timeout("Timed out after 5m")
+run.Cancel("Cancelled by user")
+run.Terminate("Force-killed")
 ```
 
 ### Output & Input Events
 
 ```go
-nl.OutputGenerated("Report ready", taskID)
-nl.OutputFailed("Rendering failed", taskID)
+run.OutputGenerated("Report ready")
+run.OutputFailed("Rendering failed")
 
-nl.InputRequired("Approve deployment?", taskID)
-nl.InputApproved("Approved", taskID)
-nl.InputRejected("Rejected", taskID)
+run.InputRequired("Approve deployment?")
+run.InputApproved("Approved")
+run.InputRejected("Rejected")
 ```
 
 ### Metrics
@@ -73,22 +83,67 @@ nl.InputRejected("Rejected", taskID)
 Numeric values accumulate; strings are replaced.
 
 ```go
-nl.Metric("tokens", 512)
-nl.Metric("tokens", 128)   // now 640
+run.Metric("tokens", 512)
+run.Metric("tokens", 128)   // now 640
+run.Metric("cost", 0.003)
 
-nl.ResetMetrics("tokens")  // reset one key
-nl.ResetMetrics()          // reset all
+run.ResetMetrics("tokens")  // reset one key
+run.ResetMetrics()          // reset all
 ```
 
 Metrics are automatically included in every notification's metadata.
 
+### Automatic Timing
+
+NotiLens automatically tracks task timing. These fields are included in every notification's `meta` payload when non-zero:
+
+| Field | Description |
+|-------|-------------|
+| `total_duration_ms` | Wall-clock time since `start` |
+| `queue_ms` | Time between `queue` and `start` |
+| `pause_ms` | Cumulative time spent paused |
+| `wait_ms` | Cumulative time spent waiting |
+| `active_ms` | Active time (`total − pause − wait`) |
+
 ### Generic Events
 
 ```go
-nl.Emit("custom.event", "Something happened")
-nl.Emit("custom.event", "With meta", notilens.EmitOptions{
+nl.Track("custom.event", "Something happened")
+nl.Track("custom.event", "With meta", notilens.TrackOptions{
     Meta: map[string]interface{}{"key": "value"},
 })
+
+run.Track("custom.event", "Run-level event")
+```
+
+### Full Example
+
+```go
+import (
+    "log"
+    notilens "github.com/notilens/sdk-go"
+)
+
+nl, err := notilens.Init("summarizer", notilens.Options{
+    Token:  "TOKEN",
+    Secret: "SECRET",
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+run := nl.Task("report")
+run.Start()
+
+result, err := llm.Complete(prompt)
+if err != nil {
+    run.Fail(err.Error())
+    return
+}
+
+run.Metric("tokens", result.Usage.TotalTokens)
+run.OutputGenerated("Summary ready")
+run.Complete("All done!")
 ```
 
 ## CLI
@@ -109,45 +164,53 @@ notilens remove-agent my-agent
 
 ### Commands
 
+`--task` is a semantic label (e.g. `email`, `report`). Each `task.start` creates an isolated run internally — concurrent executions of the same label never conflict.
+
 ```bash
 # Task lifecycle
-notilens task.start     --agent my-agent --task job-123
-notilens task.progress  "Fetching data" --agent my-agent --task job-123
-notilens task.loop      "Item 5/100"    --agent my-agent --task job-123
-notilens task.retry                     --agent my-agent --task job-123
-notilens task.stop                      --agent my-agent --task job-123
-notilens task.error     "Quota hit"     --agent my-agent --task job-123
-notilens task.fail      "Fatal error"   --agent my-agent --task job-123
-notilens task.timeout   "Timed out"     --agent my-agent --task job-123
-notilens task.cancel    "Cancelled"     --agent my-agent --task job-123
-notilens task.terminate "Force stop"    --agent my-agent --task job-123
-notilens task.complete  "Done!"         --agent my-agent --task job-123
+notilens task.queue                      --agent my-agent --task email
+notilens task.start                      --agent my-agent --task email
+notilens task.progress  "Fetching data"  --agent my-agent --task email
+notilens task.loop      "Item 5/100"     --agent my-agent --task email
+notilens task.retry                      --agent my-agent --task email
+notilens task.pause     "Rate limited"   --agent my-agent --task email
+notilens task.resume    "Resuming"       --agent my-agent --task email
+notilens task.wait      "Awaiting tool"  --agent my-agent --task email
+notilens task.stop                       --agent my-agent --task email
+notilens task.error     "Quota hit"      --agent my-agent --task email
+notilens task.fail      "Fatal error"    --agent my-agent --task email
+notilens task.timeout   "Timed out"      --agent my-agent --task email
+notilens task.cancel    "Cancelled"      --agent my-agent --task email
+notilens task.terminate "Force stop"     --agent my-agent --task email
+notilens task.complete  "Done!"          --agent my-agent --task email
 
 # Output / Input
-notilens output.generate "Report ready"       --agent my-agent --task job-123
-notilens output.fail     "Render failed"      --agent my-agent --task job-123
-notilens input.required  "Approve?"           --agent my-agent --task job-123
-notilens input.approve   "Approved"           --agent my-agent --task job-123
-notilens input.reject    "Rejected"           --agent my-agent --task job-123
+notilens output.generate "Report ready"  --agent my-agent --task email
+notilens output.fail     "Render failed" --agent my-agent --task email
+notilens input.required  "Approve?"      --agent my-agent --task email
+notilens input.approve   "Approved"      --agent my-agent --task email
+notilens input.reject    "Rejected"      --agent my-agent --task email
 
-# Metrics (accumulated per task)
-notilens metric       tokens=512 cost=0.003   --agent my-agent --task job-123
-notilens metric.reset tokens                  --agent my-agent --task job-123
-notilens metric.reset                         --agent my-agent --task job-123
+# Metrics (accumulated per run)
+notilens metric       tokens=512 cost=0.003 --agent my-agent --task email
+notilens metric.reset tokens               --agent my-agent --task email
+notilens metric.reset                      --agent my-agent --task email
 
 # Generic
-notilens emit my.event "Something happened"   --agent my-agent
+notilens track my.event "Something happened" --agent my-agent
 
 # Version
 notilens version
 ```
+
+`task.start` prints the internal `run_id` to stdout.
 
 ### Options
 
 | Flag | Description |
 |---|---|
 | `--agent <name>` | Agent name (required) |
-| `--task <id>` | Task ID (auto-generated if omitted) |
+| `--task <label>` | Task label (e.g. `email`, `report`) |
 | `--type success\|warning\|urgent\|info` | Override notification type |
 | `--meta key=value` | Extra metadata (repeatable) |
 | `--image_url <url>` | Attach image |
